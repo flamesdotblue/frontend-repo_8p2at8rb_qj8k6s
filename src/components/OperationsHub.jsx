@@ -1,5 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Calendar, Phone, Hash, Users, CreditCard, Percent, IndianRupee, Search, Utensils, Bed, Printer, Check, X } from 'lucide-react';
+
+const baseUrl = import.meta.env.VITE_BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin.replace(':3000', ':8000') : '');
+
+async function api(path, options = {}) {
+  const res = await fetch(`${baseUrl}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'omit',
+    ...options,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
 
 function SectionTitle({ icon: Icon, title, action }) {
   return (
@@ -32,6 +44,43 @@ export default function OperationsHub({ role }) {
   const [checkins, setCheckins] = useState([]);
   const [orders, setOrders] = useState([]);
   const [bills, setBills] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  // Load initial data
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        const [ci, ord, bl] = await Promise.all([
+          api('/api/checkins'),
+          api('/api/orders'),
+          api('/api/bills'),
+        ]);
+        setCheckins(ci.items || []);
+        setOrders(ord.items || []);
+        setBills(bl.items || []);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  async function refresh(section) {
+    if (!section || section === 'checkins') {
+      const ci = await api('/api/checkins');
+      setCheckins(ci.items || []);
+    }
+    if (!section || section === 'orders') {
+      const ord = await api('/api/orders');
+      setOrders(ord.items || []);
+    }
+    if (!section || section === 'bills') {
+      const bl = await api('/api/bills');
+      setBills(bl.items || []);
+    }
+  }
 
   // Rooms catalog (demo)
   const rooms = useMemo(() => {
@@ -40,7 +89,6 @@ export default function OperationsHub({ role }) {
     const rateMap = { Single: 2500, Double: 3200, Deluxe: 4200, Suite: 6500 };
     for (let floor = 1; floor <= 4; floor++) {
       for (let i = 1; i <= 8; i++) {
-        const number = `${floor}${String(0).padStart(1,'0')}${i}`.replace('0',''); // e.g. 101..108, 201..208
         const type = types[(i - 1) % types.length];
         list.push({ room: `${floor}0${i}`, type, rate: rateMap[type] });
       }
@@ -53,7 +101,7 @@ export default function OperationsHub({ role }) {
   // Derived views
   const unpaidOrdersByRoom = useMemo(() => {
     const map = new Map();
-    orders.filter(o => o.type === 'inhouse' && o.status === 'Unpaid').forEach(o => {
+    (orders || []).filter(o => o.type === 'inhouse' && o.status === 'Unpaid').forEach(o => {
       const key = o.room;
       const list = map.get(key) || [];
       list.push(o);
@@ -62,9 +110,9 @@ export default function OperationsHub({ role }) {
     return map;
   }, [orders]);
 
-  const occupiedRoomsSet = useMemo(() => new Set(checkins.filter(c => c.status === 'Occupied').map(c => String(c.room))), [checkins]);
+  const occupiedRoomsSet = useMemo(() => new Set((checkins || []).filter(c => c.status === 'Occupied').map(c => String(c.room))), [checkins]);
 
-  function handleCheckIn(e) {
+  async function handleCheckIn(e) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     const payload = Object.fromEntries(data.entries());
@@ -74,65 +122,66 @@ export default function OperationsHub({ role }) {
     payload.advance = Number(payload.advance || 0);
     payload.createdAt = payload.createdAt ? new Date(payload.createdAt).toISOString() : new Date().toISOString();
     payload.status = 'Occupied';
-    setCheckins(prev => [payload, ...prev]);
-    window.alert('Guest checked in and room marked occupied.');
-    e.currentTarget.reset();
+    try {
+      setLoading(true);
+      await api('/api/checkins', { method: 'POST', body: JSON.stringify(payload) });
+      await refresh('checkins');
+      window.alert('Guest checked in and room marked occupied.');
+      e.currentTarget.reset();
+    } catch (err) {
+      window.alert('Error: ' + (err.message || 'Failed to check-in'));
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function handleOrder(e, inhouse = true) {
+  async function handleOrder(e, inhouse = true) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     const payload = Object.fromEntries(data.entries());
-    payload.items = JSON.parse(payload.items || '[]');
+    try {
+      payload.items = JSON.parse(payload.items || '[]');
+    } catch {
+      window.alert('Items must be valid JSON');
+      return;
+    }
     payload.total = payload.items.reduce((s, it) => s + it.qty * it.price, 0);
     payload.type = inhouse ? 'inhouse' : 'outside';
     payload.createdAt = new Date().toISOString();
-    setOrders(prev => [payload, ...prev]);
-    window.alert('Order captured');
-    e.currentTarget.reset();
+    try {
+      setLoading(true);
+      await api('/api/orders', { method: 'POST', body: JSON.stringify(payload) });
+      await refresh('orders');
+      window.alert('Order captured');
+      e.currentTarget.reset();
+    } catch (err) {
+      window.alert('Error: ' + (err.message || 'Failed to save order'));
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function handleCheckout(checkin) {
-    const nights = Math.max(1, Math.ceil((new Date() - new Date(checkin.createdAt)) / (1000*60*60*24)));
-    const roomCharges = nights * (checkin.rate || 0);
-    const extras = 0;
-    const taxRate = 0.12;
-
-    const linkedOrders = unpaidOrdersByRoom.get(checkin.room) || [];
-    const foodTotal = linkedOrders.reduce((s, o) => s + (o.total || 0), 0);
-
-    const subtotal = roomCharges + extras + foodTotal;
-    const tax = Math.round(subtotal * taxRate);
-    const grand = subtotal + tax - (checkin.advance || 0);
-
-    const bill = {
-      id: 'BILL-' + Math.random().toString(36).slice(2,8).toUpperCase(),
-      guest: checkin.name,
-      phone: checkin.phone,
-      room: checkin.room,
-      nights,
-      roomCharges,
-      foodTotal,
-      advance: checkin.advance || 0,
-      tax,
-      total: grand,
-      status: 'Unpaid',
-      mode: 'Cash',
-      createdAt: new Date().toISOString(),
-    };
-
-    setBills(prev => [bill, ...prev]);
-    // mark orders as synced (still unpaid, but attached)
-    setOrders(prev => prev.map(o => (linkedOrders.includes(o) ? { ...o, synced: true } : o)));
-    // free the room
-    setCheckins(prev => prev.map(c => (c.room === checkin.room && c.phone === checkin.phone ? { ...c, status: 'Checked-out' } : c)));
-
-    window.alert('Final bill prepared. You can print or mark paid from Bills tab.');
-    setTab('bills');
+  async function handleCheckout(checkin) {
+    try {
+      setLoading(true);
+      await api('/api/checkout', { method: 'POST', body: JSON.stringify({ room: checkin.room, phone: checkin.phone }) });
+      await Promise.all([refresh('bills'), refresh('checkins'), refresh('orders')]);
+      window.alert('Final bill prepared. You can print or mark paid from Bills tab.');
+      setTab('bills');
+    } catch (err) {
+      window.alert('Error: ' + (err.message || 'Failed to checkout'));
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function markBillPaid(id, mode) {
-    setBills(prev => prev.map(b => (b.id === id ? { ...b, status: 'Paid', mode } : b)));
+  async function markBillPaid(id, mode) {
+    try {
+      await api(`/api/bills/${id}/pay`, { method: 'POST', body: JSON.stringify({ mode }) });
+      await refresh('bills');
+    } catch (err) {
+      window.alert('Error: ' + (err.message || 'Failed to mark paid'));
+    }
   }
 
   function printBill(id) {
@@ -159,11 +208,11 @@ export default function OperationsHub({ role }) {
           <table>
             <thead><tr><th>Description</th><th>Qty</th><th>Amount</th></tr></thead>
             <tbody>
-              <tr><td>Room Charges</td><td>${bill.nights} night(s)</td><td>₹${bill.roomCharges.toLocaleString()}</td></tr>
-              <tr><td>Food (Unpaid)</td><td>-</td><td>₹${bill.foodTotal.toLocaleString()}</td></tr>
-              <tr><td>Advance Adjusted</td><td>-</td><td>-₹${(bill.advance||0).toLocaleString()}</td></tr>
-              <tr><td>Tax</td><td>12%</td><td>₹${bill.tax.toLocaleString()}</td></tr>
-              <tr><td><b>Total</b></td><td>-</td><td><b>₹${bill.total.toLocaleString()}</b></td></tr>
+              <tr><td>Room Charges</td><td>${bill.nights} night(s)</td><td>₹${Number(bill.roomCharges||0).toLocaleString()}</td></tr>
+              <tr><td>Food (Unpaid)</td><td>-</td><td>₹${Number(bill.foodTotal||0).toLocaleString()}</td></tr>
+              <tr><td>Advance Adjusted</td><td>-</td><td>-₹${Number(bill.advance||0).toLocaleString()}</td></tr>
+              <tr><td>Tax</td><td>12%</td><td>₹${Number(bill.tax||0).toLocaleString()}</td></tr>
+              <tr><td><b>Total</b></td><td>-</td><td><b>₹${Number(bill.total||0).toLocaleString()}</b></td></tr>
             </tbody>
           </table>
           <div style="margin-top:16px" class="muted">Status: ${bill.status} • Mode: ${bill.mode}</div>
@@ -221,6 +270,7 @@ export default function OperationsHub({ role }) {
             {label}
           </button>
         ))}
+        {loading && <span className="text-xs text-slate-500">Syncing…</span>}
       </div>
 
       {/* Rooms status overview */}
@@ -366,7 +416,7 @@ export default function OperationsHub({ role }) {
                     <td className="px-3 py-2">{b.id}<div className="text-xs text-slate-500">{new Date(b.createdAt).toLocaleString()}</div></td>
                     <td className="px-3 py-2">{b.guest}<div className="text-xs text-slate-500">{b.phone}</div></td>
                     <td className="px-3 py-2">{b.room}</td>
-                    <td className="px-3 py-2">₹{b.total.toLocaleString()}</td>
+                    <td className="px-3 py-2">₹{Number(b.total||0).toLocaleString()}</td>
                     <td className="px-3 py-2"><span className={`rounded-full px-2 py-1 text-xs ${b.status==='Paid'?'bg-emerald-50 text-emerald-600':'bg-amber-50 text-amber-700'}`}>{b.status}</span></td>
                     <td className="px-3 py-2 text-right flex items-center justify-end gap-2">
                       {b.status !== 'Paid' && (
@@ -400,7 +450,7 @@ export default function OperationsHub({ role }) {
                 {orders.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No orders yet.</td></tr>}
                 {orders.map((o, i) => (
                   <tr key={i}><td className="py-2">{o.type}</td><td>{o.name || 'In-house'}</td><td>{o.room || '-'}
-                  </td><td>₹{(o.total||0).toLocaleString()}</td><td>{o.status}</td></tr>
+                  </td><td>₹{Number(o.total||0).toLocaleString()}</td><td>{o.status}</td></tr>
                 ))}
               </tbody>
             </table>

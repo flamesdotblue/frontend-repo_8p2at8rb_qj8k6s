@@ -1,28 +1,31 @@
-import { useState } from 'react'
+import { useState } from 'react';
+import Header from './components/Header';
+import RoleSwitcher from './components/RoleSwitcher';
+import DashboardOverview from './components/DashboardOverview';
+import OperationsHub from './components/OperationsHub';
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [role, setRole] = useState('Manager');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 flex items-center justify-center">
-      <div className="bg-white p-8 rounded-lg shadow-lg">
-        <h1 className="text-3xl font-bold text-gray-800 mb-4">
-          Vibe Coding Platform
-        </h1>
-        <p className="text-gray-600 mb-6">
-          Your AI-powered development environment
-        </p>
-        <div className="text-center">
-          <button
-            onClick={() => setCount(count + 1)}
-            className="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded"
-          >
-            Count is {count}
-          </button>
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <Header />
+      <main className="mx-auto max-w-7xl p-4 sm:p-6 lg:p-8 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Welcome back</h2>
+            <p className="text-sm text-slate-500">Manage rooms, guests, restaurant orders and billing in one place.</p>
+          </div>
+          <RoleSwitcher role={role} onChange={setRole} />
         </div>
-      </div>
-    </div>
-  )
-}
 
-export default App
+        <DashboardOverview role={role} />
+        <OperationsHub role={role} />
+
+        <footer className="pt-6 text-center text-xs text-slate-500">
+          Built for speed in a sandbox demo. Connect to your backend to enable persistence, auth and printing to thermal/A4.
+        </footer>
+      </main>
+    </div>
+  );
+}

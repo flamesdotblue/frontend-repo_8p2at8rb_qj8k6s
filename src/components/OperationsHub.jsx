@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Calendar, Phone, Hash, Users, CreditCard, Percent, IndianRupee, Search, Utensils, Bed, Printer } from 'lucide-react';
+import { Calendar, Phone, Hash, Users, CreditCard, Percent, IndianRupee, Search, Utensils, Bed, Printer, Check, X } from 'lucide-react';
 
 function SectionTitle({ icon: Icon, title, action }) {
   return (
@@ -33,6 +33,23 @@ export default function OperationsHub({ role }) {
   const [orders, setOrders] = useState([]);
   const [bills, setBills] = useState([]);
 
+  // Rooms catalog (demo)
+  const rooms = useMemo(() => {
+    const list = [];
+    const types = ['Single', 'Double', 'Deluxe', 'Suite'];
+    const rateMap = { Single: 2500, Double: 3200, Deluxe: 4200, Suite: 6500 };
+    for (let floor = 1; floor <= 4; floor++) {
+      for (let i = 1; i <= 8; i++) {
+        const number = `${floor}${String(0).padStart(1,'0')}${i}`.replace('0',''); // e.g. 101..108, 201..208
+        const type = types[(i - 1) % types.length];
+        list.push({ room: `${floor}0${i}`, type, rate: rateMap[type] });
+      }
+    }
+    return list;
+  }, []);
+
+  const [roomFilter, setRoomFilter] = useState('All');
+
   // Derived views
   const unpaidOrdersByRoom = useMemo(() => {
     const map = new Map();
@@ -45,6 +62,8 @@ export default function OperationsHub({ role }) {
     return map;
   }, [orders]);
 
+  const occupiedRoomsSet = useMemo(() => new Set(checkins.filter(c => c.status === 'Occupied').map(c => String(c.room))), [checkins]);
+
   function handleCheckIn(e) {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -53,7 +72,7 @@ export default function OperationsHub({ role }) {
     payload.children = Number(payload.children || 0);
     payload.rate = Number(payload.rate || 0);
     payload.advance = Number(payload.advance || 0);
-    payload.createdAt = new Date().toISOString();
+    payload.createdAt = payload.createdAt ? new Date(payload.createdAt).toISOString() : new Date().toISOString();
     payload.status = 'Occupied';
     setCheckins(prev => [payload, ...prev]);
     window.alert('Guest checked in and room marked occupied.');
@@ -105,6 +124,9 @@ export default function OperationsHub({ role }) {
     setBills(prev => [bill, ...prev]);
     // mark orders as synced (still unpaid, but attached)
     setOrders(prev => prev.map(o => (linkedOrders.includes(o) ? { ...o, synced: true } : o)));
+    // free the room
+    setCheckins(prev => prev.map(c => (c.room === checkin.room && c.phone === checkin.phone ? { ...c, status: 'Checked-out' } : c)));
+
     window.alert('Final bill prepared. You can print or mark paid from Bills tab.');
     setTab('bills');
   }
@@ -159,6 +181,26 @@ export default function OperationsHub({ role }) {
     win.close();
   }
 
+  const filteredRooms = useMemo(() => {
+    return rooms.filter(r => {
+      const occupied = occupiedRoomsSet.has(String(r.room));
+      if (roomFilter === 'All') return true;
+      if (roomFilter === 'Available') return !occupied;
+      if (roomFilter === 'Occupied') return occupied;
+      return true;
+    });
+  }, [rooms, roomFilter, occupiedRoomsSet]);
+
+  const counts = useMemo(() => {
+    let occ = 0;
+    rooms.forEach(r => { if (occupiedRoomsSet.has(String(r.room))) occ++; });
+    return {
+      total: rooms.length,
+      occupied: occ,
+      available: rooms.length - occ,
+    };
+  }, [rooms, occupiedRoomsSet]);
+
   return (
     <section className="rounded-xl border bg-white p-4 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -179,6 +221,43 @@ export default function OperationsHub({ role }) {
             {label}
           </button>
         ))}
+      </div>
+
+      {/* Rooms status overview */}
+      <div className="mb-6">
+        <SectionTitle
+          icon={Bed}
+          title="Rooms Status"
+          action={(
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">{counts.occupied} occupied • {counts.available} available • {counts.total} total</span>
+              <select value={roomFilter} onChange={(e)=>setRoomFilter(e.target.value)} className="rounded-md border px-3 py-1.5 text-xs">
+                <option>All</option>
+                <option>Available</option>
+                <option>Occupied</option>
+              </select>
+            </div>
+          )}
+        />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+          {filteredRooms.map((r) => {
+            const occupied = occupiedRoomsSet.has(String(r.room));
+            const unpaidCount = (unpaidOrdersByRoom.get(r.room) || []).length;
+            return (
+              <div key={r.room} className={`rounded-lg border p-3 text-sm ${occupied ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold">{r.room}</div>
+                  {occupied ? <X size={16} className="text-amber-600" /> : <Check size={16} className="text-emerald-600" />}
+                </div>
+                <div className="mt-1 text-xs text-slate-600">{r.type} • ₹{r.rate.toLocaleString()}</div>
+                <div className="mt-2 flex items-center justify-between text-xs">
+                  <span className={`rounded-full px-2 py-0.5 ${occupied ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{occupied ? 'Occupied' : 'Available'}</span>
+                  {unpaidCount > 0 && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-rose-700">{unpaidCount} unpaid</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {tab === 'checkin' && (
@@ -242,10 +321,10 @@ export default function OperationsHub({ role }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {checkins.length === 0 && (
+                {checkins.filter(c=>c.status==='Occupied').length === 0 && (
                   <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-500">No active check-ins yet.</td></tr>
                 )}
-                {checkins.map(c => {
+                {checkins.filter(c=>c.status==='Occupied').map(c => {
                   const food = (unpaidOrdersByRoom.get(c.room)||[]).reduce((s,o)=>s+o.total,0);
                   return (
                     <tr key={c.room + c.phone}>
@@ -320,7 +399,8 @@ export default function OperationsHub({ role }) {
               <tbody className="divide-y divide-slate-200">
                 {orders.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No orders yet.</td></tr>}
                 {orders.map((o, i) => (
-                  <tr key={i}><td className="py-2">{o.type}</td><td>{o.name || 'In-house'}</td><td>{o.room || '-'}</td><td>₹{(o.total||0).toLocaleString()}</td><td>{o.status}</td></tr>
+                  <tr key={i}><td className="py-2">{o.type}</td><td>{o.name || 'In-house'}</td><td>{o.room || '-'}
+                  </td><td>₹{(o.total||0).toLocaleString()}</td><td>{o.status}</td></tr>
                 ))}
               </tbody>
             </table>

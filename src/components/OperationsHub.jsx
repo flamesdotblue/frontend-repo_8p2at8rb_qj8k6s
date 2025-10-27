@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CheckSquare, Soup, CreditCard, FileText, Plus, Trash2 } from 'lucide-react';
+import { CheckSquare, Utensils, CreditCard, FileText, Plus, Trash2 } from 'lucide-react';
 
 const ROOM_TYPES = [
   { type: 'Deluxe', rate: 3200 },
@@ -29,7 +29,7 @@ export default function OperationsHub({ role }) {
       <div className="rounded-2xl border border-white/10 bg-white/5">
         <div className="flex overflow-x-auto">
           <TabButton active={tab==='checkin'} onClick={() => setTab('checkin')} icon={<CheckSquare size={16} />} label="Check-in" />
-          <TabButton active={tab==='orders'} onClick={() => setTab('orders')} icon={<Soup size={16} />} label="Restaurant" />
+          <TabButton active={tab==='orders'} onClick={() => setTab('orders')} icon={<Utensils size={16} />} label="Restaurant" />
           <TabButton active={tab==='checkout'} onClick={() => setTab('checkout')} icon={<CreditCard size={16} />} label="Check-out" />
           <TabButton active={tab==='bills'} onClick={() => setTab('bills')} icon={<FileText size={16} />} label="Bills" />
         </div>
